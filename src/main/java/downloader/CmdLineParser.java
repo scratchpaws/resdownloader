@@ -33,13 +33,6 @@ public class CmdLineParser {
                 .desc("Display this help")
                 .build();
 
-        Option base = Option.builder("p")
-                .longOpt("parent")
-                .hasArg()
-                .argName("dir")
-                .desc("Set parent path or resources. Default - current directory.")
-                .build();
-
         Option wait = Option.builder("w")
                 .longOpt("wait")
                 .hasArg()
@@ -55,7 +48,6 @@ public class CmdLineParser {
                 .build();
 
         options.addOption(help);
-        options.addOption(base);
         options.addOption(wait);
         options.addOption(tries);
     }
@@ -74,15 +66,6 @@ public class CmdLineParser {
 
             if (help)
                 return parsedCmdline;
-
-            String rawParentPath = commandLine.getOptionValue("p", "./");
-            Path parentPath = Paths.get(rawParentPath);
-            parsedCmdline.setParentDir(parentPath);
-
-            if (Files.notExists(parentPath))
-                throw new ParseException("Parent path not exists: " + rawParentPath);
-            if (!Files.isDirectory(parentPath))
-                throw new ParseException("Parent path is not a directory: " + rawParentPath);
 
             List<String> rawInputFiles = commandLine.getArgList();
             if (rawInputFiles == null || rawInputFiles.isEmpty())
@@ -129,6 +112,7 @@ public class CmdLineParser {
             if (timeout < 1)
                 throw new ParseException("Timeout cannot be less that 1 second");
 
+            timeout *= 1000;
             parsedCmdline.setTimeout(timeout);
         } catch (ParseException err) {
             parsedCmdline.setParseException(err);

@@ -3,7 +3,6 @@ package downloader;
 import org.apache.commons.cli.ParseException;
 
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
 
@@ -11,8 +10,7 @@ public class ParsedCmdline {
 
     private boolean showHelp = false;
     private int tries = 3;
-    private int timeout = 60;
-    private Path parentDir = Paths.get("./");
+    private int timeout = 60000;
     private List<Path> inputFiles = Collections.emptyList();
     private ParseException parseException;
 
@@ -22,14 +20,6 @@ public class ParsedCmdline {
 
     public void setShowHelp(boolean showHelp) {
         this.showHelp = showHelp;
-    }
-
-    public Path getParentDir() {
-        return parentDir;
-    }
-
-    public void setParentDir(Path parentDir) {
-        this.parentDir = parentDir;
     }
 
     public List<Path> getInputFiles() {

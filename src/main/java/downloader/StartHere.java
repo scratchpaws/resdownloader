@@ -1,15 +1,17 @@
 package downloader;
 
-import org.jsoup.Jsoup;
+import org.apache.commons.io.FilenameUtils;
 import org.jsoup.nodes.Document;
-import org.mozilla.universalchardet.UniversalDetector;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
+import org.nibor.autolink.LinkExtractor;
+import org.nibor.autolink.LinkSpan;
+import org.nibor.autolink.LinkType;
 
-import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.PushbackInputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.EnumSet;
 import java.util.logging.Logger;
 
 public class StartHere {
@@ -25,37 +27,74 @@ public class StartHere {
 
         log.info("Starting...");
 
-        for (Path inputHtmlPath : parsedCmdline.getInputFiles()) {
-            log.info("Processing " + inputHtmlPath);
+        InputHtmlFilesReader inputHtmlFilesReader = new InputHtmlFilesReader(parsedCmdline.getInputFiles());
+        for (Document document : inputHtmlFilesReader) {
+            log.info("Processing " + document.location());
 
-            UniversalDetector detector = new UniversalDetector();
-            detector.reset();
+            ResourceProcessor resourceProcessor = ResourceProcessor.forDocument(document,
+                    parsedCmdline.getTries(),
+                    parsedCmdline.getTimeout());
 
-            try (PushbackInputStream pbInputStream = new PushbackInputStream(
-                    new BufferedInputStream(
-                            Files.newInputStream(inputHtmlPath), 4096),
-                    4096)) {
-                byte[] buff = new byte[4096];
-                int cnt = pbInputStream.read(buff, 0, buff.length);
-                if (cnt <= 0) {
-                    log.warning("File " + inputHtmlPath + " is empty, skip");
+            Elements imagesLinks = document.getElementsByTag("img");
+            for (Element image : imagesLinks) {
+                String src = image.attr("src");
+                String local = resourceProcessor.replaceToLocal(src);
+                if (local == null)
                     continue;
+                image.attr("src", local);
+            }
+
+            Elements scriptLinks = document.getElementsByTag("script");
+            for (Element script : scriptLinks) {
+                String src = script.attr("src");
+                if (!src.isEmpty()) {
+                    String local = resourceProcessor.replaceToLocal(src);
+                    if (local == null)
+                        continue;
+                    script.attr("src", local);
                 }
-                detector.handleData(buff);
-                detector.dataEnd();
+            }
 
-                pbInputStream.unread(buff);
+            Elements stylesLinks = document.getElementsByTag("link");
+            for (Element style : stylesLinks) {
+                String rel = style.attr("rel");
+                String href = style.attr("href");
+                if (rel.equals("stylesheet") && !href.isEmpty()) {
+                    String local = resourceProcessor.replaceToLocal(href);
+                    if (local == null)
+                        continue;
+                    style.attr("href", local);
+                }
+            }
 
-                String detectedCharset = detector.getDetectedCharset();
-                if (detectedCharset == null || detectedCharset.isEmpty())
-                    detectedCharset = StandardCharsets.UTF_8.displayName();
-                log.info("Detected charset: " + detectedCharset);
+            Elements innerStylesBodies = document.getElementsByTag("style");
+            for (Element innerStyle : innerStylesBodies) {
+                String css = innerStyle.html();
+                StringBuilder modifier = new StringBuilder(css);
+                LinkExtractor linkExtractor = LinkExtractor.builder()
+                        .linkTypes(EnumSet.of(LinkType.URL, LinkType.WWW, LinkType.EMAIL))
+                        .build();
+                for (LinkSpan linkSpan : linkExtractor.extractLinks(css)) {
+                    String url = css.substring(linkSpan.getBeginIndex(), linkSpan.getEndIndex());
+                    String local = resourceProcessor.replaceToLocal(url);
+                    if (local == null)
+                        continue;
+                    int begin = modifier.indexOf(url);
+                    if (begin >= 0) {
+                        modifier.replace(begin, begin + url.length(), local);
+                    }
+                }
+                innerStyle.html(modifier.toString());
+            }
 
-                Document document = Jsoup.parse(pbInputStream,
-                        detectedCharset,
-                        inputHtmlPath.toAbsolutePath().toString());
+            String newFileName = FilenameUtils.getBaseName(document.location())
+                    + "_dl.html";
+            log.info("Save modified html file to " + newFileName);
+            try {
+                Files.writeString(Paths.get(newFileName), document.outerHtml(), document.charset());
+                log.info("Success");
             } catch (IOException err) {
-                log.severe("Unable to read file " + inputHtmlPath + ": " + err.getMessage());
+                log.severe("Unable to save output file to " + newFileName);
             }
         }
     }
