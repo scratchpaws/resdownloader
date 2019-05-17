@@ -30,6 +30,8 @@ public class StartHere {
         InputHtmlFilesReader inputHtmlFilesReader = new InputHtmlFilesReader(parsedCmdline.getInputFiles());
         for (Document document : inputHtmlFilesReader) {
             log.info("Processing " + document.location());
+            Document.OutputSettings os = document.outputSettings();
+            os.prettyPrint(false);
 
             ResourceProcessor resourceProcessor = ResourceProcessor.forDocument(document,
                     parsedCmdline.getTries(),
@@ -87,7 +89,8 @@ public class StartHere {
                 innerStyle.html(modifier.toString());
             }
 
-            String newFileName = FilenameUtils.getBaseName(document.location())
+            String newFileName = Paths.get(document.location()).getParent().toString()
+            + System.lineSeparator() + FilenameUtils.getBaseName(document.location())
                     + "_dl.html";
             log.info("Save modified html file to " + newFileName);
             try {

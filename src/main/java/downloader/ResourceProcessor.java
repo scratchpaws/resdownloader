@@ -94,7 +94,8 @@ public class ResourceProcessor
         }
 
         if (success) {
-            String escaped = StringEscapeUtils.escapeHtml4(RESOURCES_PATH_NAME + "/" + subPath);
+            String escaped = //StringEscapeUtils.escapeHtml4(
+                    RESOURCES_PATH_NAME + "/" + subPath;//);
             converted.put(url, escaped);
             return escaped;
         } else {
