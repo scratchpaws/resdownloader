@@ -74,7 +74,7 @@ public class HttpCookieClient
         }
     }
 
-    int download(URI inputUrl, Path outputFile) throws IOException {
+    int download(URI inputUrl, Path tempFile, Path outputFile) {
         HttpGet getRequest = new HttpGet(inputUrl);
         log.info("Querying " + inputUrl);
         try (CloseableHttpResponse httpResponse = httpClient.execute(getRequest, clientContext)) {
@@ -93,7 +93,7 @@ public class HttpCookieClient
                     }
                 }
                 log.info("Writing to file");
-                try (OutputStream bufOut = Files.newOutputStream(outputFile)) {
+                try (OutputStream bufOut = Files.newOutputStream(tempFile)) {
                     httpEntity.writeTo(bufOut);
                 }
                 log.info("Wrote OK");
@@ -101,6 +101,9 @@ public class HttpCookieClient
             }
             log.warning("Response code is " + code + ": " + httpResponse.getStatusLine().getReasonPhrase());
             return code;
+        } catch (IOException err) {
+            log.warning("Unable to download file: " + err.getMessage());
+            return -1;
         }
     }
 

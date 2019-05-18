@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.logging.Logger;
 
@@ -81,11 +82,13 @@ class CmdLineParser {
                 } else if (Files.isRegularFile(inputFile)) {
                     if (!FilenameUtils.getExtension(rawInputFile).toLowerCase().startsWith("htm"))
                         throw new ParseException("Input file is not supported: " + rawInputFile);
-                    inputFiles.add(inputFile);
+                    if (alreadyNotConverted(inputFile))
+                        inputFiles.add(inputFile);
                 } else {
                     throw new ParseException("Input file is not a regular file: " + rawInputFile);
                 }
             }
+            Collections.sort(inputFiles);
             parsedCmdline.setInputFiles(inputFiles);
 
             String rawTries = commandLine.getOptionValue("t", "3");
@@ -167,17 +170,39 @@ class CmdLineParser {
 
     private void dirScanner(Path inputFile, List<Path> capacitor) throws ParseException {
         if (Files.isDirectory(inputFile)) {
+            if (inputFile.getFileName().toString().equals(ResourceProcessor.RESOURCES_PATH_NAME)) {
+                log.warning("Skipping directory " + inputFile);
+                return;
+            }
             try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(inputFile, onlySupporter)) {
                 for (Path path : dirStream) {
                     if (Files.isDirectory(path)) {
                         dirScanner(path, capacitor);
                     } else {
-                        capacitor.add(path);
+                        if (alreadyNotConverted(path))
+                            capacitor.add(path);
                     }
                 }
             } catch (IOException err) {
                 throw new ParseException("Unable to enumerate directory " + inputFile + ": " + err.getMessage());
             }
         }
+    }
+
+    private boolean alreadyNotConverted(Path inputFile) {
+        String rawInputFile = inputFile.toString();
+        if (FilenameUtils.getBaseName(rawInputFile).endsWith("_dl")) {
+            log.info("This file is already converted version: " + rawInputFile
+                    + ", skipping");
+            return false;
+        }
+        String dlName = FilenameUtils.getBaseName(rawInputFile) + "_dl.html";
+        Path alreadyConvertedPath = inputFile.resolveSibling(dlName);
+        if (Files.exists(alreadyConvertedPath)) {
+            log.info("This file already has converted version: " + rawInputFile
+                    + " - " + dlName + ", skipping");
+            return false;
+        }
+        return true;
     }
 }
