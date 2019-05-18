@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 
 public class StateData
-    implements Serializable {
+        implements Serializable {
 
     private HashMap<String, String> converted = new HashMap<>();
     private ArrayList<String> failed = new ArrayList<>();

@@ -18,12 +18,12 @@ import java.util.logging.Logger;
 
 class CmdLineParser {
 
-    private Options options;
     private static final Logger log = Logger.getLogger("CMDLINE");
     private static final DirectoryStream.Filter<Path> onlySupporter =
             path -> Files.isDirectory(path)
                     || FilenameUtils.getExtension(path.getFileName().toString())
                     .toLowerCase().startsWith("htm");
+    private Options options;
 
     CmdLineParser() {
 

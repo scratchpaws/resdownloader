@@ -5,7 +5,7 @@ import org.apache.http.cookie.CookieSpecProvider;
 import org.apache.http.protocol.HttpContext;
 
 public class EasyCookieSpecProvider
-    implements CookieSpecProvider {
+        implements CookieSpecProvider {
 
     @Override
     public CookieSpec create(HttpContext httpContext) {

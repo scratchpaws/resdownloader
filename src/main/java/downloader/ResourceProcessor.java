@@ -135,7 +135,7 @@ public class ResourceProcessor
         }
 
         if (retCode != HttpURLConnection.HTTP_OK) {
-            String errCodeFileName = "err" + (retCode > 0 ? retCode : "NO RESP") + ".png";
+            String errCodeFileName = "err" + (retCode > 0 ? retCode : "NO_RESP") + ".png";
             String errCodeEscaped = RESOURCES_PATH_NAME + "/" + errCodeFileName;
             if (stateData.getErrCodesImages().contains(retCode)) {
                 stateData.getConverted().put(url, errCodeEscaped);

@@ -8,7 +8,7 @@ import java.nio.file.Path;
 
 public class ErrorImagesGenerator {
 
-    public void generateImageFromText(String text, Path outputFile) throws IOException  {
+    public void generateImageFromText(String text, Path outputFile) throws IOException {
 
         BufferedImage bufImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
         Graphics2D graph = bufImage.createGraphics();

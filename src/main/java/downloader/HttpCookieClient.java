@@ -32,9 +32,9 @@ import java.util.logging.Logger;
 public class HttpCookieClient
         implements AutoCloseable, Closeable {
 
+    private static final Logger log = Logger.getLogger("HTTP CLIENT");
     private HttpClientContext clientContext;
     private CloseableHttpClient httpClient;
-    private static final Logger log = Logger.getLogger("HTTP CLIENT");
 
     HttpCookieClient(int timeout, boolean ignoreSsl) {
 
