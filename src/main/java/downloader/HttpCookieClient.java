@@ -36,7 +36,7 @@ public class HttpCookieClient
     private CloseableHttpClient httpClient;
     private static final Logger log = Logger.getLogger("HTTP CLIENT");
 
-    public HttpCookieClient(int timeout, boolean ignoreSsl) {
+    HttpCookieClient(int timeout, boolean ignoreSsl) {
 
         clientContext = HttpClientContext.create();
 
@@ -74,7 +74,7 @@ public class HttpCookieClient
         }
     }
 
-    public int download(URI inputUrl, Path outputFile) throws IOException {
+    int download(URI inputUrl, Path outputFile) throws IOException {
         HttpGet getRequest = new HttpGet(inputUrl);
         log.info("Querying " + inputUrl);
         try (CloseableHttpResponse httpResponse = httpClient.execute(getRequest, clientContext)) {

@@ -6,7 +6,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 
-public class ParsedCmdline {
+class ParsedCmdline {
 
     private boolean showHelp = false;
     private int tries = 3;
@@ -14,43 +14,43 @@ public class ParsedCmdline {
     private List<Path> inputFiles = Collections.emptyList();
     private ParseException parseException;
 
-    public boolean isShowHelp() {
+    boolean isShowHelp() {
         return showHelp;
     }
 
-    public void setShowHelp(boolean showHelp) {
+    void setShowHelp(boolean showHelp) {
         this.showHelp = showHelp;
     }
 
-    public List<Path> getInputFiles() {
+    List<Path> getInputFiles() {
         return inputFiles;
     }
 
-    public void setInputFiles(List<Path> inputFiles) {
+    void setInputFiles(List<Path> inputFiles) {
         this.inputFiles = inputFiles;
     }
 
-    public ParseException getParseException() {
+    ParseException getParseException() {
         return parseException;
     }
 
-    public void setParseException(ParseException parseException) {
+    void setParseException(ParseException parseException) {
         this.parseException = parseException;
     }
 
-    public int getTries() {
+    int getTries() {
         return tries;
     }
 
-    public void setTries(int tries) {
+    void setTries(int tries) {
         this.tries = tries;
     }
 
-    public int getTimeout() {
+    int getTimeout() {
         return timeout;
     }
 
-    public void setTimeout(int timeout) {
+    void setTimeout(int timeout) {
         this.timeout = timeout;
     }
 

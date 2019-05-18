@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
 
-public class CmdLineParser {
+class CmdLineParser {
 
     private Options options;
     private static final Logger log = Logger.getLogger("CMDLINE");
@@ -24,7 +24,7 @@ public class CmdLineParser {
                     || FilenameUtils.getExtension(path.getFileName().toString())
                     .toLowerCase().startsWith("htm");
 
-    public CmdLineParser() {
+    CmdLineParser() {
 
         options = new Options();
 
@@ -52,7 +52,7 @@ public class CmdLineParser {
         options.addOption(tries);
     }
 
-    public ParsedCmdline parse(String[] args) {
+    ParsedCmdline parse(String[] args) {
 
         ParsedCmdline parsedCmdline = new ParsedCmdline();
         parsedCmdline.setShowHelp(false);
@@ -121,7 +121,7 @@ public class CmdLineParser {
         return parsedCmdline;
     }
 
-    public void displayHelp() {
+    private void displayHelp() {
         HelpFormatter helpFormatter = new HelpFormatter();
         PrintWriter errWriter = new PrintWriter(System.err, true);
         String jarName = "";
@@ -153,7 +153,7 @@ public class CmdLineParser {
                 false);
     }
 
-    public void checkErrors(ParsedCmdline parsedCmdline) {
+    void checkErrors(ParsedCmdline parsedCmdline) {
         if (parsedCmdline.getParseException() != null) {
             log.severe(parsedCmdline.getParseException().getMessage());
             System.exit(2);

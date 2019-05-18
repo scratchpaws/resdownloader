@@ -1,53 +1,65 @@
 package downloader;
 
-import org.apache.commons.text.StringEscapeUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jsoup.nodes.Document;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.logging.Logger;
 
 public class ResourceProcessor
         implements Closeable, AutoCloseable {
 
-    private static final HashMap<Path, ResourceProcessor> INSTANCES = new HashMap<>();
     private static final String RESOURCES_PATH_NAME = "resources";
     private static final Logger log = Logger.getLogger("RES");
+    private static final String STATE_FILE_NAME = "state.json";
 
     private final Path baseLocation;
-    private final HashMap<String, String> converted = new HashMap<>();
-    private final List<String> failed = new ArrayList<>();
+    private final Path stateFilePath;
+    private final StateData stateData;
     private final HttpCookieClient httpClient;
     private final int tries;
 
     private ResourceProcessor(Path baseLocation, int tries, int timeout) {
         this.baseLocation = baseLocation;
+        this.stateFilePath = baseLocation.resolve(STATE_FILE_NAME);
         this.httpClient = new HttpCookieClient(timeout, true);
         this.tries = tries;
+        createDirectoriesSilent(baseLocation);
+        StateData tmp = new StateData();
+        tmp.setConverted(new HashMap<>());
+        tmp.setFailed(new ArrayList<>());
+        if (Files.exists(stateFilePath)) {
+            try (BufferedReader bufferedReader = Files.newBufferedReader(stateFilePath, StandardCharsets.UTF_8)) {
+                ObjectMapper objectMapper = new ObjectMapper();
+                tmp = objectMapper.readValue(bufferedReader, StateData.class);
+                log.info("State file loaded successfully");
+            } catch (IOException warn) {
+                log.warning("Unable to load state file; " + warn.getMessage());
+            }
+        }
+        this.stateData = tmp;
     }
 
-    public static ResourceProcessor forDocument(Document document, int tries, int timeout) {
+    static ResourceProcessor forDocument(Document document, int tries, int timeout) {
         Path documentPath = Paths.get(document.location());
         Path baseLocation = documentPath.resolveSibling(RESOURCES_PATH_NAME);
 
-        if (INSTANCES.containsKey(baseLocation)) {
-            return INSTANCES.get(baseLocation);
-        } else {
-            ResourceProcessor rp = new ResourceProcessor(baseLocation, tries, timeout);
-            INSTANCES.put(baseLocation, rp);
-            return rp;
-        }
+        return new ResourceProcessor(baseLocation, tries, timeout);
     }
 
     @Override
@@ -55,19 +67,26 @@ public class ResourceProcessor
         try {
             httpClient.close();
         } catch (IOException err) {
-            throw new RuntimeException("Unable to close http client: " + err.getMessage(), err);
+            log.severe("Unable to close http client: " + err.getMessage());
+        }
+        try (BufferedWriter bufferedWriter = Files.newBufferedWriter(stateFilePath, StandardCharsets.UTF_8)) {
+            ObjectMapper objectMapper = new ObjectMapper();
+            objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
+            objectMapper.writeValue(bufferedWriter, stateData);
+            log.info("State file saved successfully");
+        } catch (IOException warn) {
+            log.warning("Unable to save state file: " + warn.getMessage());
         }
     }
 
     @Nullable
-    public String replaceToLocal(String url) {
-
-        if (converted.containsKey(url)) {
+    String replaceToLocal(String url) {
+        if (stateData.getConverted().containsKey(url)) {
             log.info("Url already downloaded");
-            return converted.get(url);
+            return stateData.getConverted().get(url);
         }
 
-        if (failed.contains(url)) {
+        if (stateData.getFailed().contains(url)) {
             log.info("Url already failed to download");
             return null;
         }
@@ -96,10 +115,10 @@ public class ResourceProcessor
         if (success) {
             String escaped = //StringEscapeUtils.escapeHtml4(
                     RESOURCES_PATH_NAME + "/" + subPath;//);
-            converted.put(url, escaped);
+            stateData.getConverted().put(url, escaped);
             return escaped;
         } else {
-            failed.add(url);
+            stateData.getFailed().add(url);
         }
 
         return null;
@@ -124,5 +143,9 @@ public class ResourceProcessor
         } catch (IOException err) {
             throw new RuntimeException("Unable to create directory " + dir + " for save file.");
         }
+    }
+
+    Path getBaseLocation() {
+        return baseLocation;
     }
 }

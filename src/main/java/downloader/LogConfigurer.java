@@ -6,9 +6,9 @@ import java.io.IOException;
 import java.util.Properties;
 import java.util.logging.LogManager;
 
-public class LogConfigurer {
+class LogConfigurer {
 
-    public void configure() {
+    void configure() {
 
         Properties config = new Properties();
         config.setProperty("java.util.logging.SimpleFormatter.format",

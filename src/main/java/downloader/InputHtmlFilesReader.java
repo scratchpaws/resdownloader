@@ -24,7 +24,7 @@ public class InputHtmlFilesReader
     private List<Path> inputFiles;
 
     @Contract(pure = true)
-    public InputHtmlFilesReader(@NotNull List<Path> inputFiles) {
+    InputHtmlFilesReader(@NotNull List<Path> inputFiles) {
         this.inputFiles = inputFiles;
     }
 
