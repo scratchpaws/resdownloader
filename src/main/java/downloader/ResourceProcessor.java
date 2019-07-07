@@ -2,6 +2,8 @@ package downloader;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 import org.jsoup.nodes.Document;
 
@@ -19,26 +21,27 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
-import java.util.logging.Logger;
+
+import static downloader.NamesUtils.RESOURCES_PATH_NAME;
+import static downloader.NamesUtils.STATE_FILE_NAME;
 
 public class ResourceProcessor
         implements Closeable, AutoCloseable {
 
-    static final String RESOURCES_PATH_NAME = "resources";
-    private static final Logger log = Logger.getLogger("RES");
-    private static final String STATE_FILE_NAME = "state.json";
+    private static final Logger log = LogManager.getLogger(ResourceProcessor.class);
     private static final String TEMP_FILE_NAME = "temp.dat";
 
     private final Path baseLocation;
     private final Path stateFilePath;
     private final Path tmpFile;
     private final StateData stateData;
+    private final HashMap<String, String> reverseConversion = new HashMap<>();
     private final HttpCookieClient httpClient;
     private final int tries;
     private final MessageDigest md5;
     private final ErrorImagesGenerator errorImagesGenerator = new ErrorImagesGenerator();
 
-    private ResourceProcessor(Path baseLocation, int tries, int timeout) {
+    private ResourceProcessor(Path baseLocation, int tries, int timeout, boolean reverseMode) {
 
         try {
             md5 = MessageDigest.getInstance("MD5");
@@ -58,7 +61,8 @@ public class ResourceProcessor
         this.stateData.setUrlFileHashes(new HashMap<>());
         this.stateData.setErrCodesImages(new ArrayList<>());
 
-        createDirectoriesSilent(baseLocation);
+        if (!reverseMode)
+            createDirectoriesSilent(baseLocation);
 
         if (Files.exists(stateFilePath)) {
             try (BufferedReader bufferedReader = Files.newBufferedReader(stateFilePath, StandardCharsets.UTF_8)) {
@@ -74,16 +78,20 @@ public class ResourceProcessor
                     this.stateData.setErrCodesImages(loaded.getErrCodesImages());
                 log.info("State file loaded successfully");
             } catch (IOException warn) {
-                log.warning("Unable to load state file; " + warn.getMessage());
+                log.warn("Unable to load state file: {}", warn.getMessage());
             }
+        }
+
+        if (reverseMode) {
+            stateData.getConverted().forEach((url, localName) -> reverseConversion.put(localName, url));
         }
     }
 
-    static ResourceProcessor forDocument(Document document, int tries, int timeout) {
+    static ResourceProcessor forDocument(Document document, int tries, int timeout, boolean reverseMode) {
         Path documentPath = Paths.get(document.location());
         Path baseLocation = documentPath.resolveSibling(RESOURCES_PATH_NAME);
 
-        return new ResourceProcessor(baseLocation, tries, timeout);
+        return new ResourceProcessor(baseLocation, tries, timeout, reverseMode);
     }
 
     @Override
@@ -91,34 +99,36 @@ public class ResourceProcessor
         try {
             httpClient.close();
         } catch (IOException err) {
-            log.severe("Unable to close http client: " + err.getMessage());
+            log.error("Unable to close http client: {}", err.getMessage());
         }
+        if (!reverseConversion.isEmpty())
+            return;
         try (BufferedWriter bufferedWriter = Files.newBufferedWriter(stateFilePath, StandardCharsets.UTF_8)) {
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
             objectMapper.writeValue(bufferedWriter, stateData);
             log.info("State file saved successfully");
         } catch (IOException warn) {
-            log.warning("Unable to save state file: " + warn.getMessage());
+            log.warn("Unable to save state file: {}", warn.getMessage());
         }
     }
 
     @Nullable
-    String replaceToLocal(String url) {
-        if (stateData.getConverted().containsKey(url)) {
-            return stateData.getConverted().get(url);
+    private String replaceToLocal(String remoteUrl) {
+        if (stateData.getConverted().containsKey(remoteUrl)) {
+            return stateData.getConverted().get(remoteUrl);
         }
 
-        if (stateData.getFailed().contains(url)) {
+        if (stateData.getFailed().contains(remoteUrl)) {
             return null;
         }
 
         URI remote;
         try {
-            remote = new URI(url);
+            remote = new URI(remoteUrl);
         } catch (URISyntaxException err) {
-            log.warning("Unable to parse url " + url + ": " + err.getMessage());
-            stateData.getFailed().add(url);
+            log.warn("Unable to parse url {}: {}", remoteUrl, err.getMessage());
+            stateData.getFailed().add(remoteUrl);
             return null;
         }
         String subPath = (remote.getHost() != null ? remote.getHost() : "")
@@ -138,52 +148,64 @@ public class ResourceProcessor
             String errCodeFileName = "err" + (retCode > 0 ? retCode : "NO_RESP") + ".png";
             String errCodeEscaped = RESOURCES_PATH_NAME + "/" + errCodeFileName;
             if (stateData.getErrCodesImages().contains(retCode)) {
-                stateData.getConverted().put(url, errCodeEscaped);
+                stateData.getConverted().put(remoteUrl, errCodeEscaped);
                 return errCodeEscaped;
             }
             String renderText = "ERR " + (retCode > 0 ? retCode : "NO RESP");
             try {
-                log.warning("Generating error message " + errCodeEscaped);
+                log.warn("Generating error message for {}", errCodeEscaped);
                 errorImagesGenerator.generateImageFromText(renderText, baseLocation.resolve(errCodeFileName));
-                stateData.getConverted().put(url, errCodeEscaped);
+                stateData.getConverted().put(remoteUrl, errCodeEscaped);
                 stateData.getErrCodesImages().add(retCode);
                 return errCodeEscaped;
             } catch (Exception err) {
-                log.severe("Unable to generate error message image: " + err.getMessage());
-                stateData.getFailed().add(url);
+                log.warn("Unable to generate error message image: {}", err.getMessage());
+                stateData.getFailed().add(remoteUrl);
                 return null;
             }
         } else {
             String md5sum = generateMD5Hash(tmpFile);
             if (md5sum != null && stateData.getUrlFileHashes().containsKey(md5sum)) {
                 String alreadyExistsEscaped = stateData.getUrlFileHashes().get(md5sum);
-                log.info("File already present in another link: " + alreadyExistsEscaped);
-                stateData.getConverted().put(url, alreadyExistsEscaped);
+                log.info("File already present in another link: {}", alreadyExistsEscaped);
+                stateData.getConverted().put(remoteUrl, alreadyExistsEscaped);
                 return alreadyExistsEscaped;
             }
             try {
                 createDirectoriesSilent(local.getParent());
             } catch (RuntimeException err) {
-                log.severe("Unable to create directory "
-                        + local.getParent() + ": " + err.getMessage());
-                stateData.getFailed().add(url);
+                log.error("Unable to create directory {}: {}",
+                        local.getParent(), err.getMessage());
+                stateData.getFailed().add(remoteUrl);
                 return null;
             }
             try {
                 Files.move(tmpFile, local,
                         StandardCopyOption.REPLACE_EXISTING);
                 String escaped = RESOURCES_PATH_NAME + "/" + subPath;
-                stateData.getConverted().put(url, escaped);
+                stateData.getConverted().put(remoteUrl, escaped);
                 if (md5sum != null)
                     stateData.getUrlFileHashes().put(md5sum, escaped);
                 return escaped;
             } catch (IOException err) {
-                log.severe("Unable to move file to end destination "
-                        + local + ": " + err.getMessage());
-                stateData.getFailed().add(url);
+                log.error("Unable to move file to end destination {}: {}",
+                        local, err.getMessage());
+                stateData.getFailed().add(remoteUrl);
                 return null;
             }
         }
+    }
+
+    @Nullable
+    private String replaceToRevert(String localUrl) {
+        if (localUrl.startsWith("resources/err"))
+            return localUrl;
+        return reverseConversion.getOrDefault(localUrl, localUrl);
+    }
+
+    @Nullable
+    String replaceUrl(String url, boolean revertMode) {
+        return revertMode ? replaceToRevert(url) : replaceToLocal(url);
     }
 
     private void createDirectoriesSilent(Path dir) {
@@ -210,7 +232,7 @@ public class ResourceProcessor
             }
             return Base64.getEncoder().encodeToString(md5.digest());
         } catch (IOException err) {
-            log.warning("Unable to calc MD5 sum for temp file: " + err.getMessage());
+            log.warn("Unable to calc MD5 sum for temp file: {}", err.getMessage());
             return null;
         }
     }

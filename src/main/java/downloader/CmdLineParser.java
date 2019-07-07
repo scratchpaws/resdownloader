@@ -2,6 +2,8 @@ package downloader;
 
 import org.apache.commons.cli.*;
 import org.apache.commons.io.FilenameUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -14,11 +16,13 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.logging.Logger;
+
+import static downloader.NamesUtils.RESOURCES_PATH_NAME;
+import static downloader.NamesUtils.STATE_FILE_NAME;
 
 class CmdLineParser {
 
-    private static final Logger log = Logger.getLogger("CMDLINE");
+    private static final Logger log = LogManager.getLogger(CmdLineParser.class);
     private static final DirectoryStream.Filter<Path> onlySupporter =
             path -> Files.isDirectory(path)
                     || FilenameUtils.getExtension(path.getFileName().toString())
@@ -48,9 +52,15 @@ class CmdLineParser {
                 .desc("Set tries count before give up and skip download. Default - 3")
                 .build();
 
+        Option reverse = Option.builder("r")
+                .longOpt("reverse")
+                .desc("Reverse mode - convert back to original URLs")
+                .build();
+
         options.addOption(help);
         options.addOption(wait);
         options.addOption(tries);
+        options.addOption(reverse);
     }
 
     ParsedCmdline parse(String[] args) {
@@ -68,6 +78,9 @@ class CmdLineParser {
             if (help)
                 return parsedCmdline;
 
+            boolean reverseMode = commandLine.hasOption('r');
+            parsedCmdline.setReverseMode(reverseMode);
+
             List<String> rawInputFiles = commandLine.getArgList();
             if (rawInputFiles == null || rawInputFiles.isEmpty())
                 throw new ParseException("Input html files required");
@@ -78,11 +91,11 @@ class CmdLineParser {
                 if (Files.notExists(inputFile))
                     throw new ParseException("Input file not found: " + rawInputFile);
                 if (Files.isDirectory(inputFile)) {
-                    dirScanner(inputFile, inputFiles);
+                    dirScanner(inputFile, inputFiles, reverseMode);
                 } else if (Files.isRegularFile(inputFile)) {
                     if (!FilenameUtils.getExtension(rawInputFile).toLowerCase().startsWith("htm"))
                         throw new ParseException("Input file is not supported: " + rawInputFile);
-                    if (alreadyNotConverted(inputFile))
+                    if (alreadyNotConverted(inputFile, reverseMode))
                         inputFiles.add(inputFile);
                 } else {
                     throw new ParseException("Input file is not a regular file: " + rawInputFile);
@@ -158,7 +171,7 @@ class CmdLineParser {
 
     void checkErrors(ParsedCmdline parsedCmdline) {
         if (parsedCmdline.getParseException() != null) {
-            log.severe(parsedCmdline.getParseException().getMessage());
+            log.error(parsedCmdline.getParseException().getMessage());
             System.exit(2);
         }
 
@@ -168,18 +181,18 @@ class CmdLineParser {
         }
     }
 
-    private void dirScanner(Path inputFile, List<Path> capacitor) throws ParseException {
+    private void dirScanner(Path inputFile, List<Path> capacitor, boolean reverseMode) throws ParseException {
         if (Files.isDirectory(inputFile)) {
-            if (inputFile.getFileName().toString().equals(ResourceProcessor.RESOURCES_PATH_NAME)) {
-                log.warning("Skipping directory " + inputFile);
+            if (inputFile.getFileName().toString().equals(RESOURCES_PATH_NAME)) {
+                log.warn("Skipping directory \"{}\" as resources directory", inputFile);
                 return;
             }
             try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(inputFile, onlySupporter)) {
                 for (Path path : dirStream) {
                     if (Files.isDirectory(path)) {
-                        dirScanner(path, capacitor);
+                        dirScanner(path, capacitor, reverseMode);
                     } else {
-                        if (alreadyNotConverted(path))
+                        if (alreadyNotConverted(path, reverseMode))
                             capacitor.add(path);
                     }
                 }
@@ -189,18 +202,45 @@ class CmdLineParser {
         }
     }
 
-    private boolean alreadyNotConverted(Path inputFile) {
-        String rawInputFile = inputFile.toString();
-        if (FilenameUtils.getBaseName(rawInputFile).endsWith("_dl")) {
-            log.info("This file is already converted version: " + rawInputFile
-                    + ", skipping");
-            return false;
+    private boolean alreadyNotConverted(Path inputFile, boolean reverseMode) {
+        if (NamesUtils.isDownloadedName(inputFile)) {
+            if (!reverseMode) {
+                log.info("This file is already converted version: \"{}\", skipping",
+                        inputFile.toString());
+                return false;
+            } else {
+                Path origPath = NamesUtils.getOrigPath(inputFile);
+                if (Files.exists(origPath)) {
+                    log.info("This file already has reversed version: \"{}\" - \"{}\", skipping",
+                            inputFile.toString(), origPath.getFileName().toString());
+                    return false;
+                }
+                Path resourceDir = inputFile.resolveSibling(RESOURCES_PATH_NAME);
+                if (!Files.exists(resourceDir) && !Files.isDirectory(resourceDir)) {
+                    log.info("Resources directory for file \"{}\" - \"{}\" not found, skipping",
+                            inputFile.toString(), resourceDir.toString());
+                    return false;
+                }
+                Path stateFile = resourceDir.resolve(STATE_FILE_NAME);
+                if (!Files.exists(stateFile) && !Files.isRegularFile(stateFile)) {
+                    log.info("State file for file \"{}\" - \"{}\", not found into resource directory",
+                            inputFile.toString(), stateFile.toString());
+                    return false;
+                }
+            }
+            return true;
         }
-        String dlName = FilenameUtils.getBaseName(rawInputFile) + "_dl.html";
-        Path alreadyConvertedPath = inputFile.resolveSibling(dlName);
-        if (Files.exists(alreadyConvertedPath)) {
-            log.info("This file already has converted version: " + rawInputFile
-                    + " - " + dlName + ", skipping");
+
+        if (!reverseMode) {
+            Path alreadyConvertedPath = NamesUtils.getDownloadPath(inputFile);
+            if (Files.exists(alreadyConvertedPath)) {
+                log.info("This file already has converted version: \"{}\" - \"{}\", skipping",
+                        inputFile.toString(), alreadyConvertedPath.getFileName().toString());
+                return false;
+            }
+        } else {
+            log.info("This file is original or reversed version: \"{}\", skipping",
+                    inputFile.toString());
             return false;
         }
         return true;

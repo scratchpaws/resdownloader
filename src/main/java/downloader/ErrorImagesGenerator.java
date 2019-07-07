@@ -6,9 +6,9 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Path;
 
-public class ErrorImagesGenerator {
+class ErrorImagesGenerator {
 
-    public void generateImageFromText(String text, Path outputFile) throws IOException {
+    void generateImageFromText(String text, Path outputFile) throws IOException {
 
         BufferedImage bufImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
         Graphics2D graph = bufImage.createGraphics();

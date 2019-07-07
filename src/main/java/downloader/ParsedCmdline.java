@@ -9,6 +9,7 @@ import java.util.List;
 class ParsedCmdline {
 
     private boolean showHelp = false;
+    private boolean reverseMode = false;
     private int tries = 3;
     private int timeout = 60000;
     private List<Path> inputFiles = Collections.emptyList();
@@ -54,4 +55,11 @@ class ParsedCmdline {
         this.timeout = timeout;
     }
 
+    boolean isReverseMode() {
+        return reverseMode;
+    }
+
+    void setReverseMode(boolean reverseMode) {
+        this.reverseMode = reverseMode;
+    }
 }
