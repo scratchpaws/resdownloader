@@ -6,7 +6,7 @@
 
     <groupId>scratchypaws</groupId>
     <artifactId>res-downloader</artifactId>
-    <version>0.1.1b</version>
+    <version>0.1.2b</version>
     <packaging>jar</packaging>
     <name>downloader</name>
 
