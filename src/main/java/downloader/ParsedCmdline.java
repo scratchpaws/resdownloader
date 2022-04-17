@@ -14,6 +14,11 @@ class ParsedCmdline {
     private int timeout = 60000;
     private List<Path> inputFiles = Collections.emptyList();
     private ParseException parseException;
+    private String externalHost = null;
+    private String externalUserName = null;
+    private String externalPassword = null;
+    private int externalPort = 22;
+    private Path externalKeyFile = null;
 
     boolean isShowHelp() {
         return showHelp;
@@ -61,5 +66,45 @@ class ParsedCmdline {
 
     void setReverseMode(boolean reverseMode) {
         this.reverseMode = reverseMode;
+    }
+
+    public String getExternalHost() {
+        return externalHost;
+    }
+
+    public void setExternalHost(String externalHost) {
+        this.externalHost = externalHost;
+    }
+
+    public String getExternalUserName() {
+        return externalUserName;
+    }
+
+    public void setExternalUserName(String externalUserName) {
+        this.externalUserName = externalUserName;
+    }
+
+    public int getExternalPort() {
+        return externalPort;
+    }
+
+    public void setExternalPort(int externalPort) {
+        this.externalPort = externalPort;
+    }
+
+    public Path getExternalKeyFile() {
+        return externalKeyFile;
+    }
+
+    public void setExternalKeyFile(Path externalKeyFile) {
+        this.externalKeyFile = externalKeyFile;
+    }
+
+    public String getExternalPassword() {
+        return externalPassword;
+    }
+
+    public void setExternalPassword(String externalPassword) {
+        this.externalPassword = externalPassword;
     }
 }

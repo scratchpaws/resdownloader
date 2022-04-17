@@ -27,40 +27,70 @@ class CmdLineParser {
             path -> Files.isDirectory(path)
                     || FilenameUtils.getExtension(path.getFileName().toString())
                     .toLowerCase().startsWith("htm");
-    private Options options;
+    private final Options options;
+
+    private final Option helpOption = Option.builder("h")
+            .longOpt("help")
+            .desc("Display this help")
+            .build();
+
+    private final Option waitOption = Option.builder("w")
+            .longOpt("wait")
+            .hasArg()
+            .argName("sec.")
+            .desc("Set waiting timeout. Default - 60 sec.")
+            .build();
+
+    private final Option triesOption = Option.builder("t")
+            .longOpt("tries")
+            .hasArg()
+            .argName("count")
+            .desc("Set tries count before give up and skip download. Default - 3")
+            .build();
+
+    private final Option reverseOption = Option.builder("r")
+            .longOpt("reverse")
+            .desc("Reverse mode - convert back to original URLs")
+            .build();
+
+    private final Option externalHostOption = Option.builder("e")
+            .longOpt("external")
+            .hasArg()
+            .argName("hostname or IP")
+            .desc("remote host name for SSH connection")
+            .build();
+
+    private final Option externalUserNameOption = Option.builder("u")
+            .longOpt("user")
+            .hasArg()
+            .argName("username")
+            .desc("remote host username")
+            .build();
+
+    private final Option externalPasswordOption = Option.builder("p")
+            .longOpt("password")
+            .hasArg()
+            .argName("password")
+            .desc("remote host password")
+            .build();
+
+    private final Option externalKeyFileOption = Option.builder("k")
+            .longOpt("key")
+            .hasArg()
+            .argName("path")
+            .desc("remote host SSH keyfile")
+            .build();
 
     CmdLineParser() {
-
         options = new Options();
-
-        Option help = Option.builder("h")
-                .longOpt("help")
-                .desc("Display this help")
-                .build();
-
-        Option wait = Option.builder("w")
-                .longOpt("wait")
-                .hasArg()
-                .argName("sec.")
-                .desc("Set waiting timeout. Default - 60 sec.")
-                .build();
-
-        Option tries = Option.builder("t")
-                .longOpt("tries")
-                .hasArg()
-                .argName("count")
-                .desc("Set tries count before give up and skip download. Default - 3")
-                .build();
-
-        Option reverse = Option.builder("r")
-                .longOpt("reverse")
-                .desc("Reverse mode - convert back to original URLs")
-                .build();
-
-        options.addOption(help);
-        options.addOption(wait);
-        options.addOption(tries);
-        options.addOption(reverse);
+        options.addOption(helpOption);
+        options.addOption(waitOption);
+        options.addOption(triesOption);
+        options.addOption(reverseOption);
+        options.addOption(externalHostOption);
+        options.addOption(externalUserNameOption);
+        options.addOption(externalPasswordOption);
+        options.addOption(externalKeyFileOption);
     }
 
     ParsedCmdline parse(String[] args) {
@@ -72,13 +102,13 @@ class CmdLineParser {
             DefaultParser parser = new DefaultParser();
             CommandLine commandLine = parser.parse(options, args);
 
-            boolean help = commandLine.hasOption("h");
+            boolean help = commandLine.hasOption(this.helpOption.getOpt());
             parsedCmdline.setShowHelp(help);
 
             if (help)
                 return parsedCmdline;
 
-            boolean reverseMode = commandLine.hasOption('r');
+            boolean reverseMode = commandLine.hasOption(this.reverseOption.getOpt());
             parsedCmdline.setReverseMode(reverseMode);
 
             List<String> rawInputFiles = commandLine.getArgList();
@@ -104,7 +134,7 @@ class CmdLineParser {
             Collections.sort(inputFiles);
             parsedCmdline.setInputFiles(inputFiles);
 
-            String rawTries = commandLine.getOptionValue("t", "3");
+            String rawTries = commandLine.getOptionValue(this.triesOption.getOpt(), "3");
             int tries;
             try {
                 tries = Integer.parseInt(rawTries);
@@ -117,7 +147,7 @@ class CmdLineParser {
 
             parsedCmdline.setTries(tries);
 
-            String rawTimeout = commandLine.getOptionValue("w", "60");
+            String rawTimeout = commandLine.getOptionValue(this.waitOption.getOpt(), "60");
             int timeout;
             try {
                 timeout = Integer.parseInt(rawTimeout);
@@ -130,6 +160,38 @@ class CmdLineParser {
 
             timeout *= 1000;
             parsedCmdline.setTimeout(timeout);
+
+            String remoteHostName = commandLine.getOptionValue(this.externalHostOption.getOpt());
+            if (remoteHostName != null) {
+                String[] remoteHostParts = remoteHostName.split(":");
+                String externalHostName = remoteHostParts[0];
+                int externalPort = 22;
+                if (remoteHostParts.length >= 2) {
+                    try {
+                        externalPort = Integer.parseInt(remoteHostParts[1]);
+                    } catch (NumberFormatException nfe) {
+                        throw new ParseException("Unable to parse port number in remote hostname: " + remoteHostParts[1]);
+                    }
+                }
+                parsedCmdline.setExternalHost(externalHostName);
+                parsedCmdline.setExternalPort(externalPort);
+            }
+
+            String remoteUserName = commandLine.getOptionValue(this.externalUserNameOption.getOpt());
+            parsedCmdline.setExternalUserName(remoteUserName);
+
+            String remotePassword = commandLine.getOptionValue(this.externalPasswordOption.getOpt());
+            parsedCmdline.setExternalPassword(remotePassword);
+
+            String remoteKeyFile = commandLine.getOptionValue(this.externalKeyFileOption.getOpt());
+            if (remoteKeyFile != null) {
+                Path remoteKeyPath = Paths.get(remoteKeyFile);
+                if (Files.isRegularFile(remoteKeyPath)) {
+                    parsedCmdline.setExternalKeyFile(remoteKeyPath);
+                } else {
+                    throw new ParseException("Unable to find SSH keyfile: " + remoteKeyFile);
+                }
+            }
         } catch (ParseException err) {
             parsedCmdline.setParseException(err);
         }
@@ -143,10 +205,10 @@ class CmdLineParser {
         String jarName = "";
         try {
             jarName = Paths.get(CmdLineParser.class
-                    .getProtectionDomain()
-                    .getCodeSource()
-                    .getLocation()
-                    .toURI())
+                            .getProtectionDomain()
+                            .getCodeSource()
+                            .getLocation()
+                            .toURI())
                     .getFileName()
                     .toString();
         } catch (URISyntaxException ignore) {

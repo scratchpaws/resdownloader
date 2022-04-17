@@ -37,11 +37,20 @@ public class ResourceProcessor
     private final StateData stateData;
     private final HashMap<String, String> reverseConversion = new HashMap<>();
     private final HttpCookieClient httpClient;
+    private final SSHWgetClient sshWgetClient;
     private final int tries;
     private final MessageDigest md5;
     private final ErrorImagesGenerator errorImagesGenerator = new ErrorImagesGenerator();
 
-    private ResourceProcessor(Path baseLocation, int tries, int timeout, boolean reverseMode) {
+    private ResourceProcessor(final Path baseLocation,
+                              final int tries,
+                              final int timeout,
+                              final boolean reverseMode,
+                              final String externalHost,
+                              final int externalPort,
+                              final String externalUserName,
+                              final String externalPassword,
+                              final Path externalKey) {
 
         try {
             md5 = MessageDigest.getInstance("MD5");
@@ -61,8 +70,21 @@ public class ResourceProcessor
         this.stateData.setUrlFileHashes(new HashMap<>());
         this.stateData.setErrCodesImages(new ArrayList<>());
 
-        if (!reverseMode)
+        if (!reverseMode) {
             createDirectoriesSilent(baseLocation);
+            if (externalHost != null && externalUserName != null) {
+                try {
+                    sshWgetClient = new SSHWgetClient(externalHost, externalPort, externalUserName, externalPassword, externalKey,
+                            timeout, true);
+                } catch (Exception err) {
+                    throw new RuntimeException("Unable to use external SSH downloader host \"" + externalHost + "\":" + err.getMessage(), err);
+                }
+            } else {
+                sshWgetClient = null;
+            }
+        } else {
+            sshWgetClient = null;
+        }
 
         if (Files.exists(stateFilePath)) {
             try (BufferedReader bufferedReader = Files.newBufferedReader(stateFilePath, StandardCharsets.UTF_8)) {
@@ -87,11 +109,20 @@ public class ResourceProcessor
         }
     }
 
-    static ResourceProcessor forDocument(Document document, int tries, int timeout, boolean reverseMode) {
+    static ResourceProcessor forDocument(final Document document,
+                                         final int tries,
+                                         final int timeout,
+                                         final boolean reverseMode,
+                                         final String externalHost,
+                                         final int externalPort,
+                                         final String externalUserName,
+                                         final String externalPassword,
+                                         final Path externalKey) {
         Path documentPath = Paths.get(document.location());
         Path baseLocation = documentPath.resolveSibling(RESOURCES_PATH_NAME);
 
-        return new ResourceProcessor(baseLocation, tries, timeout, reverseMode);
+        return new ResourceProcessor(baseLocation, tries, timeout, reverseMode,
+                externalHost, externalPort, externalUserName, externalPassword, externalKey);
     }
 
     @Override
@@ -100,6 +131,13 @@ public class ResourceProcessor
             httpClient.close();
         } catch (IOException err) {
             log.error("Unable to close http client: {}", err.getMessage());
+        }
+        try {
+            if (sshWgetClient != null) {
+                sshWgetClient.close();
+            }
+        } catch (IOException err) {
+            log.error("Unable to close SSH client: {}", err.getMessage());
         }
         if (!reverseConversion.isEmpty())
             return;
@@ -138,7 +176,9 @@ public class ResourceProcessor
 
         int retCode = -1;
         for (int i = 1; i <= tries; i++) {
-            retCode = httpClient.download(remote, tmpFile, local);
+            retCode = sshWgetClient != null
+                    ? sshWgetClient.download(remote, tmpFile, local)
+                    : httpClient.download(remote, tmpFile, local);
             if (retCode >= HttpURLConnection.HTTP_OK) {
                 break;
             }
@@ -215,10 +255,6 @@ public class ResourceProcessor
         } catch (IOException err) {
             throw new RuntimeException("Unable to create directory " + dir + " for save file.");
         }
-    }
-
-    Path getBaseLocation() {
-        return baseLocation;
     }
 
     @Nullable

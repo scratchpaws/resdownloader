@@ -34,8 +34,12 @@ public class StartHere {
 
         log.info("Starting...");
 
-        InputHtmlFilesReader inputHtmlFilesReader = new InputHtmlFilesReader(parsedCmdline.getInputFiles());
+        final InputHtmlFilesReader inputHtmlFilesReader = new InputHtmlFilesReader(parsedCmdline.getInputFiles());
+        final long totalFilesCount = inputHtmlFilesReader.size();
+        long filesCounter = 0L;
+
         for (Document document : inputHtmlFilesReader) {
+            filesCounter++;
             log.info("Processing {}", document.location());
             Document.OutputSettings os = document.outputSettings();
             os.prettyPrint(false);
@@ -43,10 +47,23 @@ public class StartHere {
             try (ResourceProcessor resourceProcessor = ResourceProcessor.forDocument(document,
                     parsedCmdline.getTries(),
                     parsedCmdline.getTimeout(),
-                    parsedCmdline.isReverseMode())) {
+                    parsedCmdline.isReverseMode(),
+                    parsedCmdline.getExternalHost(),
+                    parsedCmdline.getExternalPort(),
+                    parsedCmdline.getExternalUserName(),
+                    parsedCmdline.getExternalPassword(),
+                    parsedCmdline.getExternalKeyFile())) {
 
-                Elements imagesLinks = document.getElementsByTag("img");
+                final Elements imagesLinks = document.getElementsByTag("img");
+                final Elements scriptLinks = document.getElementsByTag("script");
+                final Elements stylesLinks = document.getElementsByTag("link");
+                final Elements innerStylesBodies = document.getElementsByTag("style");
+                final long totalUrlsCount = imagesLinks.size() + scriptLinks.size() + stylesLinks.size() + innerStylesBodies.size();
+                long urlsCounter = 0L;
+
                 for (Element image : imagesLinks) {
+                    urlsCounter++;
+                    log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
                     String src = image.attr("src");
                     String replaced = resourceProcessor.replaceUrl(src, parsedCmdline.isReverseMode());
                     if (replaced == null)
@@ -54,8 +71,9 @@ public class StartHere {
                     image.attr("src", replaced);
                 }
 
-                Elements scriptLinks = document.getElementsByTag("script");
                 for (Element script : scriptLinks) {
+                    urlsCounter++;
+                    log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
                     String src = script.attr("src");
                     if (!src.isEmpty()) {
                         String replaced = resourceProcessor.replaceUrl(src, parsedCmdline.isReverseMode());
@@ -65,8 +83,9 @@ public class StartHere {
                     }
                 }
 
-                Elements stylesLinks = document.getElementsByTag("link");
                 for (Element style : stylesLinks) {
+                    urlsCounter++;
+                    log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
                     String rel = style.attr("rel");
                     String href = style.attr("href");
                     if (rel.equals("stylesheet") && !href.isEmpty()) {
@@ -77,8 +96,9 @@ public class StartHere {
                     }
                 }
 
-                Elements innerStylesBodies = document.getElementsByTag("style");
                 for (Element innerStyle : innerStylesBodies) {
+                    urlsCounter++;
+                    log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
                     String css = innerStyle.html();
                     StringBuilder modifier = new StringBuilder(css);
                     if (!parsedCmdline.isReverseMode()) {

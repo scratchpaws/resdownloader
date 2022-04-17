@@ -1,5 +1,6 @@
 package downloader;
 
+import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.CookieStore;
 import org.apache.http.client.config.RequestConfig;
@@ -14,7 +15,11 @@ import org.apache.http.cookie.CookieSpecProvider;
 import org.apache.http.impl.client.BasicCookieStore;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.http.message.BasicHeader;
 import org.apache.http.ssl.SSLContextBuilder;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.NotNull;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
@@ -27,14 +32,16 @@ import java.nio.file.Path;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
-import java.util.logging.Logger;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
 public class HttpCookieClient
         implements AutoCloseable, Closeable {
 
-    private static final Logger log = Logger.getLogger("HTTP CLIENT");
-    private HttpClientContext clientContext;
-    private CloseableHttpClient httpClient;
+    private static final Logger log = LogManager.getLogger(HttpCookieClient.class.getSimpleName());
+    private final HttpClientContext clientContext;
+    private final CloseableHttpClient httpClient;
 
     HttpCookieClient(int timeout, boolean ignoreSsl) {
 
@@ -64,13 +71,16 @@ public class HttpCookieClient
                 HostnameVerifier allowAllHosts = new NoopHostnameVerifier();
                 SSLConnectionSocketFactory connectionFactory = new SSLConnectionSocketFactory(sslContext, allowAllHosts);
                 httpClient = HttpClients.custom()
+                        .setDefaultHeaders(buildDefaultHeaders())
                         .setSSLSocketFactory(connectionFactory)
                         .build();
             } catch (NoSuchAlgorithmException | KeyStoreException | KeyManagementException err) {
                 throw new RuntimeException("unable to create api client", err);
             }
         } else {
-            httpClient = HttpClients.createDefault();
+            httpClient = HttpClients.custom()
+                    .setDefaultHeaders(buildDefaultHeaders())
+                    .build();
         }
     }
 
@@ -99,10 +109,10 @@ public class HttpCookieClient
                 log.info("Wrote OK");
                 return code;
             }
-            log.warning("Response code is " + code + ": " + httpResponse.getStatusLine().getReasonPhrase());
+            log.warn("Response code is " + code + ": " + httpResponse.getStatusLine().getReasonPhrase());
             return code;
         } catch (IOException err) {
-            log.warning("Unable to download file: " + err.getMessage());
+            log.warn("Unable to download file: " + err.getMessage());
             return -1;
         }
     }
@@ -110,5 +120,15 @@ public class HttpCookieClient
     @Override
     public void close() throws IOException {
         httpClient.close();
+    }
+
+    @NotNull
+    private Collection<Header> buildDefaultHeaders() {
+        List<Header> headers = new ArrayList<>();
+        headers.add(new BasicHeader("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.74 Safari/537.36"));
+        headers.add(new BasicHeader("DNT", "1"));
+        headers.add(new BasicHeader("Accept-Language","ru,en-US;q=0.9,en;q=0.8,ru-RU;q=0.7"));
+        return headers;
     }
 }

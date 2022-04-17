@@ -21,6 +21,14 @@
         </RollingFile>
     </Appenders>
     <Loggers>
+        <Logger name="HTTP CLIENT" level="info" additivity="false">
+            <AppenderRef ref="STDOUT"/>
+            <AppenderRef ref="plainLogger"/>
+        </Logger>
+        <Logger name="downloader.HttpCookieClient" level="info" additivity="false">
+            <AppenderRef ref="STDOUT"/>
+            <AppenderRef ref="plainLogger"/>
+        </Logger>
         <Root level="info">
             <AppenderRef ref="STDOUT"/>
             <AppenderRef ref="plainLogger"/>

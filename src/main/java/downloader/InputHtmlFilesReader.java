@@ -22,11 +22,15 @@ public class InputHtmlFilesReader
         implements Iterable<Document> {
 
     private static final Logger log = LogManager.getLogger(InputHtmlFilesReader.class);
-    private List<Path> inputFiles;
+    private final List<Path> inputFiles;
 
     @Contract(pure = true)
     InputHtmlFilesReader(@NotNull List<Path> inputFiles) {
         this.inputFiles = inputFiles;
+    }
+
+    public int size() {
+        return inputFiles.size();
     }
 
     @NotNull
@@ -35,7 +39,7 @@ public class InputHtmlFilesReader
         return new DocIterator(inputFiles.iterator());
     }
 
-    public class DocIterator
+    public static class DocIterator
             implements Iterator<Document> {
 
         private final Iterator<Path> filesIterator;
@@ -69,7 +73,7 @@ public class InputHtmlFilesReader
                     pbInputStream.unread(buff);
 
                     String detectedCharset = detector.getDetectedCharset();
-                    if (detectedCharset == null || detectedCharset.isEmpty())
+                    if (detectedCharset == null || detectedCharset.isEmpty() || detectedCharset.equals("US-ASCII"))
                         detectedCharset = StandardCharsets.UTF_8.displayName();
                     log.info("File: \"{}\", detected charset: {}", nextFile.getFileName(), detectedCharset);
 
