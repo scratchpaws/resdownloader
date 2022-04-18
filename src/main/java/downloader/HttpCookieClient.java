@@ -29,6 +29,7 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -46,6 +47,7 @@ public class HttpCookieClient
     HttpCookieClient(int timeout, boolean ignoreSsl) {
 
         clientContext = HttpClientContext.create();
+        timeout *= 1000;
 
         Registry<CookieSpecProvider> registry = RegistryBuilder.<CookieSpecProvider>create()
                 .register("easy", new EasyCookieSpecProvider()).build();
@@ -99,6 +101,7 @@ public class HttpCookieClient
                     long contentLength = httpEntity.getContentLength();
                     if (fileSize == contentLength) {
                         log.info("File already exists, size match");
+                        Files.copy(outputFile, tempFile, StandardCopyOption.REPLACE_EXISTING);
                         return code;
                     }
                 }

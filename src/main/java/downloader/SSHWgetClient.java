@@ -6,6 +6,7 @@ import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -16,6 +17,7 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public class SSHWgetClient
         implements Closeable, AutoCloseable {
@@ -52,59 +54,120 @@ public class SSHWgetClient
         log.info("Connected");
     }
 
-    int download(URI inputUrl, Path tempFile, Path outputFile) {
-        log.info("Querying " + inputUrl);
-        ChannelExec channelExec = null;
+    @Contract("_ -> new")
+    private @NotNull ExecResult executeCommand(final @NotNull String command) {
+        ByteArrayOutputStream stdErr = new ByteArrayOutputStream();
+        ByteArrayOutputStream stdOut = new ByteArrayOutputStream();
+        ChannelExec exec = null;
         try {
-            channelExec = (ChannelExec) session.openChannel("exec");
-            ByteArrayOutputStream stdErr = new ByteArrayOutputStream();
-            ByteArrayOutputStream stdOut = new ByteArrayOutputStream();
-            channelExec.setErrStream(stdErr);
-            channelExec.setOutputStream(stdOut);
-            StringBuilder commandBuilder = new StringBuilder()
-                    .append("/bin/wget -O - ")
-                    .append("--timeout=")
-                    .append(timeout)
-                    .append(" ");
-            if (ignoreSSL) {
-                commandBuilder.append("--no-check-certificate ");
-            }
-            commandBuilder.append("'")
-                    .append(inputUrl.toString())
-                    .append("'");
-            channelExec.setCommand(commandBuilder.toString());
-            channelExec.connect();
-            while (channelExec.isConnected()) {
+            exec = (ChannelExec) session.openChannel("exec");
+            exec.setOutputStream(stdOut);
+            exec.setErrStream(stdErr);
+            exec.setCommand(command);
+            exec.connect();
+            while (exec.isConnected()) {
                 try {
                     Thread.sleep(50);
                 } catch (InterruptedException err) {
                     throw new JSchException("interrupt signal");
                 }
             }
-            String errOutput = stdErr.toString();
-            log.info(errOutput);
-            int retCode = channelExec.getExitStatus();
-            if (retCode == 0 && errOutput.contains("200 OK")) {
+            return new ExecResult(stdOut.toByteArray(), stdErr.toByteArray(), exec.getExitStatus());
+        } catch (JSchException cerr) {
+            throw new RuntimeException("unable to execute command \"" + command + "\": " + cerr.getMessage(), cerr);
+        } finally {
+            try {
+                if (exec != null) {
+                    exec.disconnect();
+                }
+            } catch (Exception ignore) {}
+        }
+    }
+
+    int download(URI inputUrl, Path tempFile, Path outputFile) {
+        log.info("Querying " + inputUrl);
+        try {
+            String mktempCommand = "mktemp -p /tmp resdownloader_XXXXXXXXXXXXX";
+            ExecResult mktemp = executeCommand(mktempCommand);
+            String remoteTempPath = mktemp.getStdoutString().replaceAll("(\r\n|\r|\n)", "");
+            log.info(mktempCommand);
+            log.info(remoteTempPath);
+            String mktempStderr = mktemp.getStderrString();
+            if (mktempStderr.length() > 0) {
+                log.warn(mktempStderr);
+            }
+            if (mktemp.exitStatus != 0) {
+                throw new RuntimeException("\"" + mktempCommand + "\" exited with non-zero code");
+            }
+
+            StringBuilder commandBuilder = new StringBuilder()
+                    .append("wget -O ")
+                    .append(remoteTempPath)
+                    .append(" --timeout=")
+                    .append(timeout)
+                    .append(" --tries=1 ");
+            if (ignoreSSL) {
+                commandBuilder.append("--no-check-certificate ");
+            }
+            commandBuilder.append("'")
+                    .append(inputUrl.toString())
+                    .append("'");
+            String wgetExecComand = commandBuilder.toString();
+            log.info(wgetExecComand);
+            ExecResult wgetResult = executeCommand(commandBuilder.toString());
+            String wgetStderrOutput = wgetResult.getStderrString();
+            log.info(wgetStderrOutput);
+
+            String catCommand = "cat \"" + remoteTempPath + "\"";
+            log.info(catCommand);
+            ExecResult catTmp = executeCommand(catCommand);
+            String catStderr = catTmp.getStderrString();
+            if (catStderr.length() > 0) {
+                log.warn(catStderr);
+            }
+
+            String rmCommand = "rm -f -- \"" + remoteTempPath + "\"";
+            log.info(rmCommand);
+            ExecResult rmTmp = executeCommand(rmCommand);
+            String rmStderr = rmTmp.getStderrString();
+            if (rmStderr.length() > 0) {
+                log.warn(rmStderr);
+            }
+
+            if (catTmp.exitStatus != 0) {
+                throw new RuntimeException("cat exited with non-zero code");
+            }
+
+            if (rmTmp.exitStatus != 0) {
+                log.warn("rm exited with non-zero code");
+            }
+
+            if (wgetResult.exitStatus == 0 && wgetStderrOutput.contains("200 OK")) {
                 log.info("HTTP OK");
                 if (Files.exists(outputFile)) {
                     long fileSize = Files.size(outputFile);
-                    long contentLength = stdOut.size();
+                    long contentLength = catTmp.stdout.length;
                     if (fileSize == contentLength) {
                         log.info("File already exists, size match");
+                        Files.copy(outputFile, tempFile, StandardCopyOption.REPLACE_EXISTING);
                         return 200;
                     }
                 }
                 log.info("Writing to file");
                 try (OutputStream bufOut = Files.newOutputStream(tempFile)) {
-                    stdOut.writeTo(bufOut);
+                    bufOut.write(catTmp.stdout);
                 }
                 log.info("Wrote OK");
                 return 200;
             } else {
-                if (errOutput.contains("404: Not Found")) {
+                if (wgetStderrOutput.contains("404: Not Found")) {
                     return 404;
-                } else if (errOutput.contains("403: Forbidden")) {
+                } else if (wgetStderrOutput.contains("403: Forbidden")) {
                     return 403;
+                } else if (wgetStderrOutput.contains("503: Service Temporarily Unavailable")) {
+                    return 503;
+                } else if (wgetStderrOutput.contains("451: Unavailable For Legal Reasons")) {
+                    return 451;
                 } else {
                     return -1;
                 }
@@ -112,15 +175,9 @@ public class SSHWgetClient
         } catch (IOException err) {
             log.warn("Unable to download file: " + err.getMessage());
             return -1;
-        } catch (JSchException err) {
+        } catch (Exception err) {
             log.error("Connection error: " + err.getMessage());
             throw new RuntimeException(err);
-        } finally {
-            if (channelExec != null) {
-                try {
-                    channelExec.disconnect();
-                } catch (Exception ignore) {}
-            }
         }
     }
 

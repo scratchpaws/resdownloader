@@ -158,7 +158,6 @@ class CmdLineParser {
             if (timeout < 1)
                 throw new ParseException("Timeout cannot be less that 1 second");
 
-            timeout *= 1000;
             parsedCmdline.setTimeout(timeout);
 
             String remoteHostName = commandLine.getOptionValue(this.externalHostOption.getOpt());
