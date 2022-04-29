@@ -8,6 +8,7 @@ class NamesUtils {
 
     static final String RESOURCES_PATH_NAME = "resources";
     static final String STATE_FILE_NAME = "state.json";
+    static final String STATE_DB_NAME = "state.sqlite3";
 
     private static String getDownloadName(Path inputName) {
         return FilenameUtils.getBaseName(inputName.toString()) + "_dl.html";

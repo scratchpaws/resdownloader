@@ -1,13 +1,15 @@
 package downloader;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 import org.jsoup.nodes.Document;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -18,12 +20,9 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HashMap;
 
-import static downloader.NamesUtils.RESOURCES_PATH_NAME;
-import static downloader.NamesUtils.STATE_FILE_NAME;
+import static downloader.NamesUtils.*;
 
 public class ResourceProcessor
         implements Closeable, AutoCloseable {
@@ -32,17 +31,17 @@ public class ResourceProcessor
     private static final String TEMP_FILE_NAME = "temp.dat";
 
     private final Path baseLocation;
-    private final Path stateFilePath;
     private final Path tmpFile;
-    private final StateData stateData;
-    private final HashMap<String, String> reverseConversion = new HashMap<>();
+    //private final HashMap<String, String> reverseConversion = new HashMap<>();
     private final HttpCookieClient httpClient;
     private final SSHWgetClient sshWgetClient;
     private final int tries;
     private final MessageDigest md5;
     private final ErrorImagesGenerator errorImagesGenerator = new ErrorImagesGenerator();
+    private final SqliteState sqliteState;
 
-    private ResourceProcessor(final Path baseLocation,
+    private ResourceProcessor(final SqliteHolder sqliteHolder,
+                              final Path baseLocation,
                               final int tries,
                               final int timeout,
                               final boolean reverseMode,
@@ -59,16 +58,17 @@ public class ResourceProcessor
         }
 
         this.baseLocation = baseLocation;
-        this.stateFilePath = baseLocation.resolve(STATE_FILE_NAME);
+        Path stateFilePath = baseLocation.resolve(STATE_FILE_NAME);
+        Path sqlitePath = baseLocation.resolve(STATE_DB_NAME);
         this.tmpFile = baseLocation.resolve(TEMP_FILE_NAME);
         this.httpClient = new HttpCookieClient(timeout, true);
         this.tries = tries;
 
-        this.stateData = new StateData();
-        this.stateData.setConverted(new HashMap<>());
+        StateData stateData = new StateData();
+        /*this.stateData.setConverted(new HashMap<>());
         this.stateData.setFailed(new ArrayList<>());
         this.stateData.setUrlFileHashes(new HashMap<>());
-        this.stateData.setErrCodesImages(new ArrayList<>());
+        this.stateData.setErrCodesImages(new ArrayList<>());*/
 
         if (!reverseMode) {
             createDirectoriesSilent(baseLocation);
@@ -86,30 +86,37 @@ public class ResourceProcessor
             sshWgetClient = null;
         }
 
-        if (Files.exists(stateFilePath)) {
+        if (Files.exists(stateFilePath) && Files.notExists(sqlitePath)) {
             try (BufferedReader bufferedReader = Files.newBufferedReader(stateFilePath, StandardCharsets.UTF_8)) {
                 ObjectMapper objectMapper = new ObjectMapper();
                 StateData loaded = objectMapper.readValue(bufferedReader, StateData.class);
                 if (loaded.getFailed() != null && !loaded.getFailed().isEmpty())
-                    this.stateData.setFailed(loaded.getFailed());
+                    stateData.setFailed(loaded.getFailed());
                 if (loaded.getConverted() != null && !loaded.getConverted().isEmpty())
-                    this.stateData.setConverted(loaded.getConverted());
+                    stateData.setConverted(loaded.getConverted());
                 if (loaded.getUrlFileHashes() != null && !loaded.getUrlFileHashes().isEmpty())
-                    this.stateData.setUrlFileHashes(loaded.getUrlFileHashes());
+                    stateData.setUrlFileHashes(loaded.getUrlFileHashes());
                 if (loaded.getErrCodesImages() != null && !loaded.getErrCodesImages().isEmpty())
-                    this.stateData.setErrCodesImages(loaded.getErrCodesImages());
+                    stateData.setErrCodesImages(loaded.getErrCodesImages());
                 log.info("State file loaded successfully");
             } catch (IOException warn) {
                 log.warn("Unable to load state file: {}", warn.getMessage());
             }
         }
 
-        if (reverseMode) {
+        sqliteState = sqliteHolder.getConnection(sqlitePath);
+        sqliteState.getFailed().addAll(stateData.getFailed());
+        sqliteState.getConverted().putAll(stateData.getConverted());
+        sqliteState.getUrlFileHashes().putAll(stateData.getUrlFileHashes());
+        stateData.getErrCodesImages().forEach(v -> sqliteState.getErrCodesImages().add(v));
+
+        /*if (reverseMode) {
             stateData.getConverted().forEach((url, localName) -> reverseConversion.put(localName, url));
-        }
+        }*/
     }
 
-    static ResourceProcessor forDocument(final Document document,
+    static ResourceProcessor forDocument(final SqliteHolder sqliteHolder,
+                                         final Document document,
                                          final int tries,
                                          final int timeout,
                                          final boolean reverseMode,
@@ -121,7 +128,7 @@ public class ResourceProcessor
         Path documentPath = Paths.get(document.location());
         Path baseLocation = documentPath.resolveSibling(RESOURCES_PATH_NAME);
 
-        return new ResourceProcessor(baseLocation, tries, timeout, reverseMode,
+        return new ResourceProcessor(sqliteHolder, baseLocation, tries, timeout, reverseMode,
                 externalHost, externalPort, externalUserName, externalPassword, externalKey);
     }
 
@@ -139,25 +146,25 @@ public class ResourceProcessor
         } catch (IOException err) {
             log.error("Unable to close SSH client: {}", err.getMessage());
         }
-        if (!reverseConversion.isEmpty())
-            return;
-        try (BufferedWriter bufferedWriter = Files.newBufferedWriter(stateFilePath, StandardCharsets.UTF_8)) {
+        /*if (!reverseConversion.isEmpty())
+            return;*/
+        /*try (BufferedWriter bufferedWriter = Files.newBufferedWriter(stateFilePath, StandardCharsets.UTF_8)) {
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
             objectMapper.writeValue(bufferedWriter, stateData);
             log.info("State file saved successfully");
         } catch (IOException warn) {
             log.warn("Unable to save state file: {}", warn.getMessage());
-        }
+        }*/
     }
 
     @Nullable
     private String replaceToLocal(String remoteUrl) {
-        if (stateData.getConverted().containsKey(remoteUrl)) {
-            return stateData.getConverted().get(remoteUrl);
+        if (sqliteState.getConverted().containsKey(remoteUrl)) {
+            return sqliteState.getConverted().get(remoteUrl);
         }
 
-        if (stateData.getFailed().contains(remoteUrl)) {
+        if (sqliteState.getFailed().contains(remoteUrl)) {
             return null;
         }
 
@@ -166,7 +173,7 @@ public class ResourceProcessor
             remote = new URI(remoteUrl);
         } catch (URISyntaxException err) {
             log.warn("Unable to parse url {}: {}", remoteUrl, err.getMessage());
-            stateData.getFailed().add(remoteUrl);
+            sqliteState.getFailed().add(remoteUrl);
             return null;
         }
         String subPath = (remote.getHost() != null ? remote.getHost() : "")
@@ -187,28 +194,29 @@ public class ResourceProcessor
         if (retCode != HttpURLConnection.HTTP_OK) {
             String errCodeFileName = "err" + (retCode > 0 ? retCode : "NO_RESP") + ".png";
             String errCodeEscaped = RESOURCES_PATH_NAME + "/" + errCodeFileName;
-            if (stateData.getErrCodesImages().contains(retCode)) {
-                stateData.getConverted().put(remoteUrl, errCodeEscaped);
+            if (sqliteState.getErrCodesImages().contains(retCode)) {
+                sqliteState.getConverted().put(remoteUrl, errCodeEscaped);
                 return errCodeEscaped;
             }
             String renderText = "ERR " + (retCode > 0 ? retCode : "NO RESP");
             try {
                 log.warn("Generating error message for {}", errCodeEscaped);
                 errorImagesGenerator.generateImageFromText(renderText, baseLocation.resolve(errCodeFileName));
-                stateData.getConverted().put(remoteUrl, errCodeEscaped);
-                stateData.getErrCodesImages().add(retCode);
+                sqliteState.getConverted().put(remoteUrl, errCodeEscaped);
+                sqliteState.getErrCodesImages().add(retCode);
                 return errCodeEscaped;
             } catch (Exception err) {
                 log.warn("Unable to generate error message image: {}", err.getMessage());
-                stateData.getFailed().add(remoteUrl);
+                sqliteState.getFailed().add(remoteUrl);
                 return null;
             }
         } else {
             String md5sum = generateMD5Hash(tmpFile);
-            if (md5sum != null && stateData.getUrlFileHashes().containsKey(md5sum)) {
-                String alreadyExistsEscaped = stateData.getUrlFileHashes().get(md5sum);
+            if (md5sum != null && sqliteState.getUrlFileHashes().containsKey(md5sum)) {
+                String alreadyExistsEscaped = sqliteState.getUrlFileHashes().get(md5sum);
                 log.info("File already present in another link: {}", alreadyExistsEscaped);
-                stateData.getConverted().put(remoteUrl, alreadyExistsEscaped);
+                if (alreadyExistsEscaped != null)
+                    sqliteState.getConverted().put(remoteUrl, alreadyExistsEscaped);
                 return alreadyExistsEscaped;
             }
             try {
@@ -216,21 +224,21 @@ public class ResourceProcessor
             } catch (RuntimeException err) {
                 log.error("Unable to create directory {}: {}",
                         local.getParent(), err.getMessage());
-                stateData.getFailed().add(remoteUrl);
+                sqliteState.getFailed().add(remoteUrl);
                 return null;
             }
             try {
                 Files.move(tmpFile, local,
                         StandardCopyOption.REPLACE_EXISTING);
                 String escaped = RESOURCES_PATH_NAME + "/" + subPath;
-                stateData.getConverted().put(remoteUrl, escaped);
+                sqliteState.getConverted().put(remoteUrl, escaped);
                 if (md5sum != null)
-                    stateData.getUrlFileHashes().put(md5sum, escaped);
+                    sqliteState.getUrlFileHashes().put(md5sum, escaped);
                 return escaped;
             } catch (IOException err) {
                 log.error("Unable to move file to end destination {}: {}",
                         local, err.getMessage());
-                stateData.getFailed().add(remoteUrl);
+                sqliteState.getFailed().add(remoteUrl);
                 return null;
             }
         }
@@ -240,7 +248,9 @@ public class ResourceProcessor
     private String replaceToRevert(String localUrl) {
         if (localUrl.startsWith("resources/err"))
             return localUrl;
-        return reverseConversion.getOrDefault(localUrl, localUrl);
+        String url = sqliteState.getConverted().getByValue(localUrl);
+        return url != null ? url : localUrl;
+        //return reverseConversion.getOrDefault(localUrl, localUrl);
     }
 
     @Nullable

@@ -38,111 +38,114 @@ public class StartHere {
         final long totalFilesCount = inputHtmlFilesReader.size();
         long filesCounter = 0L;
 
-        for (Document document : inputHtmlFilesReader) {
-            filesCounter++;
-            log.info("Processing {}", document.location());
-            Document.OutputSettings os = document.outputSettings();
-            os.prettyPrint(false);
+        try (SqliteHolder sqliteHolder = new SqliteHolder()) {
+            for (Document document : inputHtmlFilesReader) {
+                filesCounter++;
+                log.info("Processing {}", document.location());
+                Document.OutputSettings os = document.outputSettings();
+                os.prettyPrint(false);
 
-            try (ResourceProcessor resourceProcessor = ResourceProcessor.forDocument(document,
-                    parsedCmdline.getTries(),
-                    parsedCmdline.getTimeout(),
-                    parsedCmdline.isReverseMode(),
-                    parsedCmdline.getExternalHost(),
-                    parsedCmdline.getExternalPort(),
-                    parsedCmdline.getExternalUserName(),
-                    parsedCmdline.getExternalPassword(),
-                    parsedCmdline.getExternalKeyFile())) {
+                try (ResourceProcessor resourceProcessor = ResourceProcessor.forDocument(sqliteHolder,
+                        document,
+                        parsedCmdline.getTries(),
+                        parsedCmdline.getTimeout(),
+                        parsedCmdline.isReverseMode(),
+                        parsedCmdline.getExternalHost(),
+                        parsedCmdline.getExternalPort(),
+                        parsedCmdline.getExternalUserName(),
+                        parsedCmdline.getExternalPassword(),
+                        parsedCmdline.getExternalKeyFile())) {
 
-                final Elements imagesLinks = document.getElementsByTag("img");
-                final Elements scriptLinks = document.getElementsByTag("script");
-                final Elements stylesLinks = document.getElementsByTag("link");
-                final Elements innerStylesBodies = document.getElementsByTag("style");
-                final long totalUrlsCount = imagesLinks.size() + scriptLinks.size() + stylesLinks.size() + innerStylesBodies.size();
-                long urlsCounter = 0L;
+                    final Elements imagesLinks = document.getElementsByTag("img");
+                    final Elements scriptLinks = document.getElementsByTag("script");
+                    final Elements stylesLinks = document.getElementsByTag("link");
+                    final Elements innerStylesBodies = document.getElementsByTag("style");
+                    final long totalUrlsCount = imagesLinks.size() + scriptLinks.size() + stylesLinks.size() + innerStylesBodies.size();
+                    long urlsCounter = 0L;
 
-                for (Element image : imagesLinks) {
-                    urlsCounter++;
-                    log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
-                    String src = image.attr("src");
-                    String replaced = resourceProcessor.replaceUrl(src, parsedCmdline.isReverseMode());
-                    if (replaced == null)
-                        continue;
-                    image.attr("src", replaced);
-                }
-
-                for (Element script : scriptLinks) {
-                    urlsCounter++;
-                    log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
-                    String src = script.attr("src");
-                    if (!src.isEmpty()) {
+                    for (Element image : imagesLinks) {
+                        urlsCounter++;
+                        log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
+                        String src = image.attr("src");
                         String replaced = resourceProcessor.replaceUrl(src, parsedCmdline.isReverseMode());
                         if (replaced == null)
                             continue;
-                        script.attr("src", replaced);
+                        image.attr("src", replaced);
                     }
-                }
 
-                for (Element style : stylesLinks) {
-                    urlsCounter++;
-                    log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
-                    String rel = style.attr("rel");
-                    String href = style.attr("href");
-                    if (rel.equals("stylesheet") && !href.isEmpty()) {
-                        String replaced = resourceProcessor.replaceUrl(href, parsedCmdline.isReverseMode());
-                        if (replaced == null)
-                            continue;
-                        style.attr("href", replaced);
-                    }
-                }
-
-                for (Element innerStyle : innerStylesBodies) {
-                    urlsCounter++;
-                    log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
-                    String css = innerStyle.html();
-                    StringBuilder modifier = new StringBuilder(css);
-                    if (!parsedCmdline.isReverseMode()) {
-                        LinkExtractor linkExtractor = LinkExtractor.builder()
-                                .linkTypes(EnumSet.of(LinkType.URL, LinkType.WWW, LinkType.EMAIL))
-                                .build();
-                        for (LinkSpan linkSpan : linkExtractor.extractLinks(css)) {
-                            String url = css.substring(linkSpan.getBeginIndex(), linkSpan.getEndIndex());
-                            String local = resourceProcessor.replaceUrl(url, parsedCmdline.isReverseMode());
-                            if (local == null)
+                    for (Element script : scriptLinks) {
+                        urlsCounter++;
+                        log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
+                        String src = script.attr("src");
+                        if (!src.isEmpty()) {
+                            String replaced = resourceProcessor.replaceUrl(src, parsedCmdline.isReverseMode());
+                            if (replaced == null)
                                 continue;
-                            int begin = modifier.indexOf(url);
-                            if (begin >= 0) {
-                                modifier.replace(begin, begin + url.length(), local);
-                            }
-                        }
-
-                    } else {
-                        Matcher cssUrlMatcher = cssLink.matcher(css);
-                        while (cssUrlMatcher.find()) {
-                            String found = cssUrlMatcher.group();
-                            String url = found.substring(cssLinkBegin.length(), found.lastIndexOf(cssLinkEnd));
-                            String revert = resourceProcessor.replaceUrl(url, parsedCmdline.isReverseMode());
-                            if (revert == null)
-                                continue;
-                            int begin = modifier.indexOf(url);
-                            if (begin >= 0) {
-                                modifier.replace(begin, begin + url.length(), revert);
-                            }
+                            script.attr("src", replaced);
                         }
                     }
-                    innerStyle.html(modifier.toString());
-                }
 
-                Path newFileName = parsedCmdline.isReverseMode()
-                        ? NamesUtils.getOrigPath(Paths.get(document.location()))
-                        : NamesUtils.getDownloadPath(Paths.get(document.location()));
+                    for (Element style : stylesLinks) {
+                        urlsCounter++;
+                        log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
+                        String rel = style.attr("rel");
+                        String href = style.attr("href");
+                        if (rel.equals("stylesheet") && !href.isEmpty()) {
+                            String replaced = resourceProcessor.replaceUrl(href, parsedCmdline.isReverseMode());
+                            if (replaced == null)
+                                continue;
+                            style.attr("href", replaced);
+                        }
+                    }
 
-                log.info("Save modified html file to {}", newFileName);
-                try (BufferedWriter bufferedWriter = Files.newBufferedWriter(newFileName, document.charset())) {
-                    bufferedWriter.append(document.outerHtml());
-                    log.info("Success");
-                } catch (IOException err) {
-                    log.error("Unable to save output file to {}: {}", newFileName, err.getMessage());
+                    for (Element innerStyle : innerStylesBodies) {
+                        urlsCounter++;
+                        log.info(String.format("File %d of %d: processing link %d of %d", filesCounter, totalFilesCount, urlsCounter, totalUrlsCount));
+                        String css = innerStyle.html();
+                        StringBuilder modifier = new StringBuilder(css);
+                        if (!parsedCmdline.isReverseMode()) {
+                            LinkExtractor linkExtractor = LinkExtractor.builder()
+                                    .linkTypes(EnumSet.of(LinkType.URL, LinkType.WWW, LinkType.EMAIL))
+                                    .build();
+                            for (LinkSpan linkSpan : linkExtractor.extractLinks(css)) {
+                                String url = css.substring(linkSpan.getBeginIndex(), linkSpan.getEndIndex());
+                                String local = resourceProcessor.replaceUrl(url, parsedCmdline.isReverseMode());
+                                if (local == null)
+                                    continue;
+                                int begin = modifier.indexOf(url);
+                                if (begin >= 0) {
+                                    modifier.replace(begin, begin + url.length(), local);
+                                }
+                            }
+
+                        } else {
+                            Matcher cssUrlMatcher = cssLink.matcher(css);
+                            while (cssUrlMatcher.find()) {
+                                String found = cssUrlMatcher.group();
+                                String url = found.substring(cssLinkBegin.length(), found.lastIndexOf(cssLinkEnd));
+                                String revert = resourceProcessor.replaceUrl(url, parsedCmdline.isReverseMode());
+                                if (revert == null)
+                                    continue;
+                                int begin = modifier.indexOf(url);
+                                if (begin >= 0) {
+                                    modifier.replace(begin, begin + url.length(), revert);
+                                }
+                            }
+                        }
+                        innerStyle.html(modifier.toString());
+                    }
+
+                    Path newFileName = parsedCmdline.isReverseMode()
+                            ? NamesUtils.getOrigPath(Paths.get(document.location()))
+                            : NamesUtils.getDownloadPath(Paths.get(document.location()));
+
+                    log.info("Save modified html file to {}", newFileName);
+                    try (BufferedWriter bufferedWriter = Files.newBufferedWriter(newFileName, document.charset())) {
+                        bufferedWriter.append(document.outerHtml());
+                        log.info("Success");
+                    } catch (IOException err) {
+                        log.error("Unable to save output file to {}: {}", newFileName, err.getMessage());
+                    }
                 }
             }
         }
