@@ -22,7 +22,15 @@ import java.nio.file.StandardCopyOption;
 public class SSHWgetClient
         implements Closeable, AutoCloseable {
 
-    private final Session session;
+    private final JSch jSch = new JSch();
+    private Session session = null;
+    private boolean closed = false;
+    private final String hostname;
+    private final int port;
+    private final String user;
+    private final String password;
+    private final boolean hasKeyFile;
+    private final String connectionString;
     private final int timeout;
     private final boolean ignoreSSL;
     private static final Logger log = LogManager.getLogger(SSHWgetClient.class.getSimpleName());
@@ -35,53 +43,96 @@ public class SSHWgetClient
                          final int timeout,
                          final boolean ignoreSsl) throws Exception {
 
+        this.hostname = hostname;
+        this.port = port;
+        this.user = user;
+        this.password = password;
+        this.hasKeyFile = keyFile != null;
         this.timeout = timeout;
         this.ignoreSSL = ignoreSsl;
-
-        log.info("Using SSH client for downloading, host: {}@{}:{}", user, hostname, port);
-
-        JSch jSch = new JSch();
-        if (keyFile != null) {
+        this.connectionString = String.format("%s@%s:%d", user, hostname, port);
+        log.info("Using SSH client for downloading, host: {}}", connectionString);
+        if (hasKeyFile) {
             jSch.addIdentity(keyFile.toString(), password);
         }
-        session = jSch.getSession(user, hostname, port);
-        session.setConfig("StrictHostKeyChecking", "no");
-        if (keyFile == null && password != null) {
-            session.setPassword(password);
-        }
-        session.connect();
+        connectReconnect();
+    }
 
-        log.info("Connected");
+    private void connectReconnect() {
+        if (session != null) {
+            log.info("Disconnecting from {}", connectionString);
+            try {
+                session.disconnect();
+                session = null;
+            } catch (Exception err) {
+                log.warn("Unable to disconnect from {}: {}", connectionString, err.getMessage());
+            }
+        }
+        boolean connected = false;
+        int failsCount = 0;
+        while (!connected && !closed) {
+            log.info("Connecting to {} (trying {})", connectionString, failsCount + 1);
+            long delayBeforeReconnect = failsCount * 1_000L;
+            try {
+                if (delayBeforeReconnect > 0L)
+                    Thread.sleep(delayBeforeReconnect);
+            } catch (InterruptedException err) {
+                log.error("Interrupted");
+                try {
+                    close();
+                } catch (IOException ignore) {}
+                return;
+            }
+            try {
+                session = jSch.getSession(user, hostname, port);
+                session.setConfig("StrictHostKeyChecking", "no");
+                if (!hasKeyFile && password != null) {
+                    session.setPassword(password);
+                }
+                session.connect();
+                connected = true;
+            } catch (JSchException err) {
+                log.error("Unable to connect to {}: {}", connectionString, err.getMessage());
+                failsCount++;
+            }
+        }
+        log.info("Connected to {}", connectionString);
     }
 
     @Contract("_ -> new")
     private @NotNull ExecResult executeCommand(final @NotNull String command) {
-        ByteArrayOutputStream stdErr = new ByteArrayOutputStream();
-        ByteArrayOutputStream stdOut = new ByteArrayOutputStream();
-        ChannelExec exec = null;
-        try {
-            exec = (ChannelExec) session.openChannel("exec");
-            exec.setOutputStream(stdOut);
-            exec.setErrStream(stdErr);
-            exec.setCommand(command);
-            exec.connect();
-            while (exec.isConnected()) {
+        while (!closed) {
+            ChannelExec exec = null;
+            try {
+                exec = (ChannelExec) session.openChannel("exec");
+                ByteArrayOutputStream stdErr = new ByteArrayOutputStream();
+                ByteArrayOutputStream stdOut = new ByteArrayOutputStream();
+                exec.setOutputStream(stdOut);
+                exec.setErrStream(stdErr);
+                exec.setCommand(command);
+                exec.connect();
+                while (exec.isConnected()) {
+                    try {
+                        Thread.sleep(50);
+                    } catch (InterruptedException err) {
+                        log.warn("interrupt signal");
+                        return ExecResult.SSH_CLOSED_RESULT;
+                    }
+                }
+                return new ExecResult(stdOut.toByteArray(), stdErr.toByteArray(), exec.getExitStatus());
+            } catch (JSchException cerr) {
+                log.error("Unable to execute command \"{}\" on {}: {}", command, connectionString, cerr.getMessage());
+                connectReconnect();
+            } finally {
                 try {
-                    Thread.sleep(50);
-                } catch (InterruptedException err) {
-                    throw new JSchException("interrupt signal");
+                    if (exec != null) {
+                        exec.disconnect();
+                    }
+                } catch (Exception ignore) {
                 }
             }
-            return new ExecResult(stdOut.toByteArray(), stdErr.toByteArray(), exec.getExitStatus());
-        } catch (JSchException cerr) {
-            throw new RuntimeException("unable to execute command \"" + command + "\": " + cerr.getMessage(), cerr);
-        } finally {
-            try {
-                if (exec != null) {
-                    exec.disconnect();
-                }
-            } catch (Exception ignore) {}
         }
+        return ExecResult.SSH_CLOSED_RESULT;
     }
 
     int download(URI inputUrl, Path tempFile, Path outputFile) {
@@ -96,8 +147,10 @@ public class SSHWgetClient
             if (mktempStderr.length() > 0) {
                 log.warn(mktempStderr);
             }
-            if (mktemp.exitStatus != 0) {
+            if (mktemp.hasBadExitCode()) {
                 throw new RuntimeException("\"" + mktempCommand + "\" exited with non-zero code");
+            } else if (mktemp.isConnectionClosed()) {
+                throw new RuntimeException("SSH connection is closed");
             }
 
             StringBuilder commandBuilder = new StringBuilder()
@@ -115,6 +168,9 @@ public class SSHWgetClient
             String wgetExecComand = commandBuilder.toString();
             log.info(wgetExecComand);
             ExecResult wgetResult = executeCommand(commandBuilder.toString());
+            if (wgetResult.isConnectionClosed()) {
+                throw new RuntimeException("SSH connection is closed");
+            }
             String wgetStderrOutput = wgetResult.getStderrString();
             log.info(wgetStderrOutput);
 
@@ -134,15 +190,19 @@ public class SSHWgetClient
                 log.warn(rmStderr);
             }
 
-            if (catTmp.exitStatus != 0) {
+            if (catTmp.hasBadExitCode()) {
                 throw new RuntimeException("cat exited with non-zero code");
+            } else if (catTmp.isConnectionClosed()) {
+                throw new RuntimeException("SSH connection is closed");
             }
 
-            if (rmTmp.exitStatus != 0) {
+            if (rmTmp.hasBadExitCode()) {
                 log.warn("rm exited with non-zero code");
+            } else if (rmTmp.isConnectionClosed()) {
+                throw new RuntimeException("SSH connection is closed");
             }
 
-            if (wgetResult.exitStatus == 0 && wgetStderrOutput.contains("200 OK")) {
+            if (wgetResult.hasGoodExitCode() && wgetStderrOutput.contains("200 OK")) {
                 log.info("HTTP OK");
                 if (Files.exists(outputFile)) {
                     long fileSize = Files.size(outputFile);
@@ -184,10 +244,15 @@ public class SSHWgetClient
     @Override
     public void close() throws IOException {
         try {
-            session.disconnect();
-            log.info("Disconnected from " + session.getUserName() + "@" + session.getHost() + ":" + session.getPort());
+            if (session != null) {
+                session.disconnect();
+                log.info("Disconnected from " + session.getUserName() + "@" + session.getHost() + ":" + session.getPort());
+            }
         } catch (Exception err) {
             throw new IOException(err);
+        } finally {
+            closed = true;
+            session = null;
         }
     }
 }
